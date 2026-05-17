@@ -77,6 +77,40 @@
     padding: 7px 12px; border-radius: 6px; font-size: 13px;
   }
   label.filebtn:hover { background: #20242d; }
+
+  /* Truss panel */
+  .truss-panel {
+    position: absolute; top: 12px; right: 12px; width: 300px;
+    background: rgba(21, 23, 28, 0.96); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 16px; color: var(--text);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    display: none; backdrop-filter: blur(6px);
+    font-size: 13px;
+  }
+  .truss-panel.open { display: block; }
+  .truss-panel h3 { margin: 0 0 10px 0; font-size: 13px; text-transform: uppercase; color: var(--muted); letter-spacing: 0.04em; }
+  .truss-panel .row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  .truss-panel .row label { flex: 1; color: var(--muted); font-size: 12px; }
+  .truss-panel .row input[type="number"] {
+    width: 70px; background: var(--panel); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 8px; border-radius: 4px;
+    font: 12px ui-monospace, Menlo, monospace; text-align: right;
+  }
+  .truss-panel .row input[type="number"]:focus { outline: 1px solid var(--accent); }
+  .truss-panel .stats {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; margin: 10px 0; font: 11.5px ui-monospace, Menlo, monospace;
+    line-height: 1.7; color: var(--text); min-height: 60px;
+  }
+  .truss-panel .stats .savings { color: var(--accent-2); font-weight: 600; }
+  .truss-panel .stats .muted { color: var(--muted); }
+  .truss-panel .actions { display: flex; gap: 6px; margin-top: 10px; }
+  .truss-panel .actions button { flex: 1; padding: 6px 8px; font-size: 12px; }
+  .truss-panel .close-x {
+    position: absolute; top: 10px; right: 12px; background: none; border: 0;
+    color: var(--muted); font-size: 18px; cursor: pointer; padding: 0; line-height: 1;
+  }
+  .truss-panel .close-x:hover { color: var(--text); }
 </style>
 </head>
 <body>
@@ -103,6 +137,7 @@ result = p.part
     <div class="toolbar">
       <button class="primary" id="renderBtn">Render</button>
       <button class="success" id="exportBtn">Export STEP</button>
+      <button id="trussifyBtn" title="Cut a hex truss pattern">Trussify</button>
       <label class="filebtn">Open .py<input type="file" id="fileInput" accept=".py,text/x-python" /></label>
       <span class="grow"></span>
       <button id="exampleBtn" title="Load example">Example</button>
@@ -112,6 +147,37 @@ result = p.part
   <div class="right">
     <canvas id="viewer"></canvas>
     <div class="hint">Left-drag rotate · right-drag pan · scroll zoom</div>
+
+    <aside class="truss-panel" id="trussPanel">
+      <button class="close-x" id="trussCloseX" title="Close">×</button>
+      <h3>Trussify — hex honeycomb</h3>
+
+      <div class="row">
+        <label>Cell size (mm)</label>
+        <input type="number" id="cellSize" value="12" min="3" max="100" step="0.5">
+      </div>
+      <div class="row">
+        <label>Wall thickness (mm)</label>
+        <input type="number" id="wallThick" value="2" min="0.5" max="20" step="0.1">
+      </div>
+      <div class="row">
+        <label>Safety margin (mm)</label>
+        <input type="number" id="safetyMargin" value="2" min="0" max="20" step="0.1">
+      </div>
+      <div class="row">
+        <label>Density (g/cm³)</label>
+        <input type="number" id="density" value="1.25" min="0.1" max="20" step="0.01">
+      </div>
+
+      <div class="stats" id="trussStats">
+        <span class="muted">Click Preview to analyze and trussify.</span>
+      </div>
+
+      <div class="actions">
+        <button id="trussPreviewBtn" class="primary">Preview</button>
+        <button id="trussApplyBtn" class="success">Apply to script</button>
+      </div>
+    </aside>
   </div>
 </div>
 

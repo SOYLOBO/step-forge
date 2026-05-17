@@ -12,6 +12,17 @@ const fileChip = document.getElementById("filechip");
 const leftPane = document.getElementById("leftPane");
 const canvas = document.getElementById("viewer");
 
+const trussifyBtn = document.getElementById("trussifyBtn");
+const trussPanel = document.getElementById("trussPanel");
+const trussCloseX = document.getElementById("trussCloseX");
+const trussPreviewBtn = document.getElementById("trussPreviewBtn");
+const trussApplyBtn = document.getElementById("trussApplyBtn");
+const trussStats = document.getElementById("trussStats");
+const cellSizeInput = document.getElementById("cellSize");
+const wallThickInput = document.getElementById("wallThick");
+const safetyMarginInput = document.getElementById("safetyMargin");
+const densityInput = document.getElementById("density");
+
 const EXAMPLE = `from build123d import *
 
 # A simple parametric bracket
@@ -183,6 +194,87 @@ exampleBtn.addEventListener("click", () => {
   codeEl.value = EXAMPLE;
   fileChip.textContent = "example";
 });
+
+// ---- Trussify ----
+function trussParams() {
+  return {
+    cell_size: parseFloat(cellSizeInput.value),
+    wall_thickness: parseFloat(wallThickInput.value),
+    safety_margin: parseFloat(safetyMarginInput.value),
+    density_g_per_cm3: parseFloat(densityInput.value),
+  };
+}
+
+function fmt(n, d = 1) { return Number(n).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d }); }
+
+function renderTrussStats(h) {
+  const beforeVol = parseFloat(h.get("X-Before-volume_cm3"));
+  const afterVol = parseFloat(h.get("X-After-volume_cm3"));
+  const beforeMass = parseFloat(h.get("X-Before-mass_g"));
+  const afterMass = parseFloat(h.get("X-After-mass_g"));
+  const savings = parseFloat(h.get("X-Savings-Pct"));
+  const bx = parseFloat(h.get("X-Before-bbox_mm-x"));
+  const by = parseFloat(h.get("X-Before-bbox_mm-y"));
+  const bz = parseFloat(h.get("X-Before-bbox_mm-z"));
+  trussStats.innerHTML = `
+    <div><span class="muted">bbox  </span>${fmt(bx)} × ${fmt(by)} × ${fmt(bz)} mm</div>
+    <div><span class="muted">before</span> ${fmt(beforeVol)} cm³ · ${fmt(beforeMass)} g</div>
+    <div><span class="muted">after </span> ${fmt(afterVol)} cm³ · ${fmt(afterMass)} g</div>
+    <div class="savings">saved ${fmt(savings, 1)}% · ${fmt(beforeMass - afterMass)} g</div>
+  `;
+}
+
+async function doTrussPreview() {
+  setStatus("Trussifying… (this may take a few seconds)");
+  trussPreviewBtn.disabled = true;
+  trussStats.innerHTML = '<span class="muted">Working…</span>';
+  try {
+    const t0 = performance.now();
+    const params = trussParams();
+    const res = await fetch("/api/trussify-preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: codeEl.value, ...params }),
+    });
+    if (!res.ok) {
+      let detail;
+      try { detail = (await res.json()).detail; } catch { detail = await res.text(); }
+      throw new Error(detail);
+    }
+    const buf = await res.arrayBuffer();
+    const geom = new STLLoader().parse(buf);
+    replaceMesh(geom);
+    renderTrussStats(res.headers);
+    const ms = (performance.now() - t0).toFixed(0);
+    setStatus(`Trussified in ${ms} ms — preview only (script unchanged).`, "ok");
+  } catch (e) {
+    setStatus(e.message, "error");
+    trussStats.innerHTML = '<span class="muted">Error — see status below.</span>';
+  } finally {
+    trussPreviewBtn.disabled = false;
+  }
+}
+
+function doTrussApply() {
+  const p = trussParams();
+  const line = `\nresult = trussify(result, cell_size=${p.cell_size}, wall_thickness=${p.wall_thickness}, safety_margin=${p.safety_margin})\n`;
+  const code = codeEl.value;
+  // Only append if not already present in this form
+  if (code.includes("trussify(result")) {
+    setStatus("Script already contains a trussify(result, …) call — edit it manually to change params.", "error");
+    return;
+  }
+  codeEl.value = code.replace(/\s*$/, "") + line;
+  setStatus("Appended trussify(...) call to script. Re-rendering...", "ok");
+  doRender();
+}
+
+trussifyBtn.addEventListener("click", () => {
+  trussPanel.classList.toggle("open");
+});
+trussCloseX.addEventListener("click", () => trussPanel.classList.remove("open"));
+trussPreviewBtn.addEventListener("click", doTrussPreview);
+trussApplyBtn.addEventListener("click", doTrussApply);
 
 // ---- File input + drag/drop ----
 async function loadFile(file) {
