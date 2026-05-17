@@ -22,6 +22,7 @@ const cellSizeInput = document.getElementById("cellSize");
 const wallThickInput = document.getElementById("wallThick");
 const safetyMarginInput = document.getElementById("safetyMargin");
 const densityInput = document.getElementById("density");
+const cutAxisInput = document.getElementById("cutAxis");
 
 const EXAMPLE = `from build123d import *
 
@@ -202,6 +203,7 @@ function trussParams() {
     wall_thickness: parseFloat(wallThickInput.value),
     safety_margin: parseFloat(safetyMarginInput.value),
     density_g_per_cm3: parseFloat(densityInput.value),
+    cut_axis: cutAxisInput.value,
   };
 }
 
@@ -257,9 +259,9 @@ async function doTrussPreview() {
 
 function doTrussApply() {
   const p = trussParams();
-  const line = `\nresult = trussify(result, cell_size=${p.cell_size}, wall_thickness=${p.wall_thickness}, safety_margin=${p.safety_margin})\n`;
+  const axisArg = p.cut_axis === "Z" ? "" : `, cut_axis="${p.cut_axis}"`;
+  const line = `\nresult = trussify(result, cell_size=${p.cell_size}, wall_thickness=${p.wall_thickness}, safety_margin=${p.safety_margin}${axisArg})\n`;
   const code = codeEl.value;
-  // Only append if not already present in this form
   if (code.includes("trussify(result")) {
     setStatus("Script already contains a trussify(result, …) call — edit it manually to change params.", "error");
     return;

@@ -33,6 +33,7 @@ class TrussifyIn(CodeIn):
     wall_thickness: float = 2.0
     safety_margin: float = 2.0
     density_g_per_cm3: float = 1.25
+    cut_axis: str = "Z"
 
 
 RESULT_NAMES = ("result", "part", "model", "shape", "obj", "assembly")
@@ -128,6 +129,7 @@ def trussify_preview(payload: TrussifyIn) -> Response:
             cell_size=payload.cell_size,
             wall_thickness=payload.wall_thickness,
             safety_margin=payload.safety_margin,
+            cut_axis=payload.cut_axis,
         )
     except Exception:
         raise HTTPException(status_code=400, detail=traceback.format_exc())
