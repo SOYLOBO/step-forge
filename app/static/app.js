@@ -158,7 +158,9 @@ async function doRender() {
     replaceMesh(geom);
     const ms = (performance.now() - t0).toFixed(0);
     const tris = geom.attributes.position.count / 3;
-    setStatus(`Rendered ${tris.toLocaleString()} triangles in ${ms} ms.`, "ok");
+    const auto = res.headers.get("X-Auto-Translated");
+    const prefix = auto ? "Auto-translated from OpenSCAD. " : "";
+    setStatus(`${prefix}Rendered ${tris.toLocaleString()} triangles in ${ms} ms.${auto ? " Click OpenSCAD → to make the conversion permanent." : ""}`, "ok");
   } catch (e) {
     setStatus(e.message, "error");
   } finally {

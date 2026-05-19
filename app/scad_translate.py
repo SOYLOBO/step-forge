@@ -801,3 +801,32 @@ def translate(src: str) -> str:
     parser = Parser(src)
     stmts = parser.parse_program()
     return emit_program(stmts)
+
+
+_SCAD_MODULE_RE = re.compile(r"^\s*module\s+\w+\s*\(", re.MULTILINE)
+_SCAD_FN_RE = re.compile(r"\$f[nas]\s*=")
+_SCAD_OPBLOCK_RE = re.compile(
+    r"\b(union|difference|intersection|linear_extrude|rotate_extrude)\s*\(",
+)
+
+
+def looks_like_openscad(src: str) -> bool:
+    """Heuristic: would running this through the translator help?
+
+    We're conservative — Python code with `//` floor division shouldn't trip
+    this. We require either a structural OpenSCAD construct OR multiple
+    leading `//` line-comments AND no Python `import`/`def` keywords.
+    """
+    if _SCAD_MODULE_RE.search(src):
+        return True
+    if _SCAD_FN_RE.search(src):
+        return True
+    if _SCAD_OPBLOCK_RE.search(src) and "{" in src:
+        return True
+    line_starts = [ln.lstrip() for ln in src.splitlines() if ln.strip()]
+    if not line_starts:
+        return False
+    scad_comments = sum(1 for ln in line_starts if ln.startswith("//"))
+    if scad_comments >= 2 and "def " not in src and "import " not in src:
+        return True
+    return False

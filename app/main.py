@@ -58,7 +58,22 @@ def _extract_shape(ns: dict) -> Shape:
     )
 
 
+def _maybe_autotranslate(code: str) -> tuple[str, bool]:
+    """If the source looks like OpenSCAD, run it through the translator.
+
+    Returns (effective_code, auto_translated). On translator failure we fall
+    back to the original code so the user gets the natural Python error.
+    """
+    if not scad_translate.looks_like_openscad(code):
+        return code, False
+    try:
+        return scad_translate.translate(code), True
+    except Exception:
+        return code, False
+
+
 def _run_user_code(code: str) -> Shape:
+    code, _ = _maybe_autotranslate(code)
     ns: dict = {"__name__": "__user_script__", "bd": bd, "trussify": trussify}
     # Make every top-level build123d export available without an import.
     for attr in dir(bd):
@@ -85,6 +100,7 @@ def _stats_headers(stats: dict, prefix: str = "X-Stats-") -> dict:
 
 @app.post("/api/render")
 def render(payload: CodeIn) -> Response:
+    auto = scad_translate.looks_like_openscad(payload.code)
     shape = _run_user_code(payload.code)
     with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as f:
         path = Path(f.name)
@@ -93,7 +109,11 @@ def render(payload: CodeIn) -> Response:
         data = path.read_bytes()
     finally:
         path.unlink(missing_ok=True)
-    return Response(content=data, media_type="model/stl")
+    headers = {}
+    if auto:
+        headers["X-Auto-Translated"] = "openscad"
+        headers["Access-Control-Expose-Headers"] = "X-Auto-Translated"
+    return Response(content=data, media_type="model/stl", headers=headers)
 
 
 @app.post("/api/export-step")
