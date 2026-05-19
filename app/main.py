@@ -73,17 +73,34 @@ def _maybe_autotranslate(code: str) -> tuple[str, bool]:
 
 
 def _run_user_code(code: str) -> Shape:
-    code, _ = _maybe_autotranslate(code)
+    effective, auto = _maybe_autotranslate(code)
     ns: dict = {"__name__": "__user_script__", "bd": bd, "trussify": trussify}
     # Make every top-level build123d export available without an import.
     for attr in dir(bd):
         if not attr.startswith("_"):
             ns.setdefault(attr, getattr(bd, attr))
     try:
-        exec(compile(code, "<user-script>", "exec"), ns)
+        exec(compile(effective, "<user-script>", "exec"), ns)
     except Exception:
         raise HTTPException(status_code=400, detail=traceback.format_exc())
-    return _extract_shape(ns)
+    try:
+        return _extract_shape(ns)
+    except HTTPException as e:
+        # Give a more useful hint if auto-translation happened.
+        if auto:
+            hint = (
+                "Auto-translated from OpenSCAD but no shape was produced. "
+                "Most common cause: your source defines modules but never "
+                "calls one at top level. Add e.g. `cube([10,10,10]);` at "
+                "the bottom of the file so OpenSCAD has something to render."
+            )
+            if "# TODO" in effective:
+                hint += (
+                    " The translator also left # TODO markers — click "
+                    "OpenSCAD → to see them and patch by hand."
+                )
+            raise HTTPException(status_code=400, detail=hint)
+        raise e
 
 
 def _stats_headers(stats: dict, prefix: str = "X-Stats-") -> dict:

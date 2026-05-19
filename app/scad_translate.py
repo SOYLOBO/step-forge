@@ -847,7 +847,157 @@ def translate(src: str) -> str:
     """Translate OpenSCAD source to build123d Python source."""
     parser = Parser(src)
     stmts = parser.parse_program()
-    return emit_program(stmts)
+    out = emit_program(stmts)
+    return _convert_ternaries(out)
+
+
+def _convert_ternaries(code: str) -> str:
+    """Rewrite OpenSCAD `cond ? a : b` → Python `(a) if (cond) else (b)`.
+
+    Operates line-by-line. Python has no `?` operator so any `?` we see in
+    the emitted code is a leftover ternary; this keeps the substitution
+    safe against Python's many other uses of `:` (slices, dicts, defs).
+    Handles nested ternaries via recursion.
+    """
+    out = []
+    for line in code.split("\n"):
+        if "?" in line:
+            stripped = line.lstrip()
+            pad = line[: len(line) - len(stripped)]
+            out.append(pad + _convert_ternary_expr(stripped))
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def _convert_ternary_expr(s: str) -> str:
+    """Recursively convert ternaries on a single line.
+
+    Ternary has very low precedence in OpenSCAD: in `x = a ? b : c` the
+    condition is `a`, not `x = a`. We bound the condition on the left at
+    the closest depth-0 `=` (real assignment, not `==`/`!=`/`<=`/`>=`),
+    `,`, `;`, or open bracket. We bound `rest` on the right at the next
+    depth-0 `,`, `;`, or unmatched closing bracket.
+    """
+    s = _recurse_groups(s)
+
+    depth = 0
+    q_pos = -1
+    for j, ch in enumerate(s):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "?" and depth == 0:
+            q_pos = j
+            break
+    if q_pos == -1:
+        return s
+
+    depth = 0
+    q_stack = 0
+    colon_pos = -1
+    for j in range(q_pos + 1, len(s)):
+        ch = s[j]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "?" and depth == 0:
+            q_stack += 1
+        elif ch == ":" and depth == 0:
+            if q_stack == 0:
+                colon_pos = j
+                break
+            q_stack -= 1
+    if colon_pos == -1:
+        return s
+
+    cond_start = _find_cond_start(s, q_pos)
+    rest_end = _find_rest_end(s, colon_pos)
+
+    prefix = s[:cond_start]
+    cond = s[cond_start:q_pos].strip()
+    mid = s[q_pos + 1 : colon_pos].strip()
+    rest_raw = s[colon_pos + 1 : rest_end].strip()
+    suffix = s[rest_end:]
+    rest_conv = _convert_ternary_expr(rest_raw)
+    return prefix + f"(({mid}) if ({cond}) else ({rest_conv}))" + suffix
+
+
+def _find_cond_start(s: str, q_pos: int) -> int:
+    """Walk back from q_pos to find where the condition expression starts."""
+    depth = 0
+    j = q_pos - 1
+    while j >= 0:
+        ch = s[j]
+        if ch in ")]}":
+            depth += 1
+            j -= 1
+            continue
+        if ch in "([{":
+            if depth == 0:
+                return j + 1
+            depth -= 1
+            j -= 1
+            continue
+        if depth == 0:
+            if ch in ",;":
+                return j + 1
+            if ch == "=":
+                # Comparison ops end in '=': `==`, `!=`, `<=`, `>=`.
+                if j > 0 and s[j - 1] in "=!<>":
+                    j -= 2
+                    continue
+                return j + 1
+        j -= 1
+    return 0
+
+
+def _find_rest_end(s: str, colon_pos: int) -> int:
+    """Walk forward from colon_pos to find where the `rest` expression ends."""
+    depth = 0
+    for j in range(colon_pos + 1, len(s)):
+        ch = s[j]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            if depth == 0:
+                return j
+            depth -= 1
+        elif depth == 0 and ch in ",;":
+            return j
+    return len(s)
+
+
+def _recurse_groups(s: str) -> str:
+    """Apply ternary conversion to contents of every balanced (...) / [...] /
+    {...} group on this line."""
+    out: list[str] = []
+    i = 0
+    n = len(s)
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    while i < n:
+        ch = s[i]
+        if ch in pairs:
+            close = pairs[ch]
+            depth = 1
+            j = i + 1
+            while j < n and depth > 0:
+                if s[j] in "([{":
+                    depth += 1
+                elif s[j] in ")]}":
+                    depth -= 1
+                if depth > 0:
+                    j += 1
+            inner = s[i + 1 : j] if j > i + 1 else ""
+            inner_conv = _convert_ternary_expr(inner) if "?" in inner else inner
+            out.append(ch + inner_conv + (close if j < n else ""))
+            i = j + 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
 
 
 _SCAD_MODULE_RE = re.compile(r"^\s*module\s+\w+\s*\(", re.MULTILINE)
