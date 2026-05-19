@@ -374,6 +374,28 @@ class Parser:
         return _rejoin(out)
 
 
+def _scad_range_to_py(expr: str) -> str:
+    """Convert an OpenSCAD `[a:b]` or `[a:s:b]` literal to a Python `range(...)`.
+
+    OpenSCAD ranges are end-INCLUSIVE; Python `range` is end-exclusive, so we
+    add 1 to the stop. List literals `[a, b, c]` (no `:`) pass through.
+    """
+    s = expr.strip()
+    if not (s.startswith("[") and s.endswith("]")):
+        return expr
+    inner = s[1:-1]
+    # Only treat as range if there's at least one top-level ':'.
+    if ":" not in inner:
+        return expr
+    parts = _split_top(inner, ":")
+    parts = [p.strip() for p in parts]
+    if len(parts) == 2:
+        return f"range(int({parts[0]}), int({parts[1]}) + 1)"
+    if len(parts) == 3:
+        return f"range(int({parts[0]}), int({parts[2]}) + 1, int({parts[1]}))"
+    return expr
+
+
 def _expr_to_py(s: str) -> str:
     """Light cleanup of OpenSCAD expressions for Python.
 
@@ -702,8 +724,8 @@ def _comment_to_py(text: str) -> str:
 def emit_program(stmts: list) -> str:
     """Emit a build123d-flavored Python source string."""
     out: list[str] = ["from build123d import *", ""]
-    has_csg_actions = False
-    result_assigned = False
+    counter = {"n": 0}                   # mutable so emit_stmt can bump it
+    top_level_accs: list[str] = []       # names that hold top-level CSG output
 
     def emit_stmt(s, indent: int = 0) -> list[str]:
         pad = "    " * indent
@@ -761,38 +783,63 @@ def emit_program(stmts: list) -> str:
             return [*ctx.prelude, f"{pad}result = {expr}"]
         if isinstance(s, tuple) and s and s[0] == "for_loop":
             _, var, it, body = s
-            inner_lines: list[str] = []
+            py_iter = _scad_range_to_py(_expr_to_py(it))
+            csg_children = [c for c in body if isinstance(c, CSGNode)]
+            other_children = [c for c in body if not isinstance(c, CSGNode)]
+            if csg_children:
+                counter["n"] += 1
+                acc = f"_for_acc_{counter['n']}"
+                step_name = f"_step_{counter['n']}"
+                lines = [f"{pad}{acc} = None", f"{pad}for {var} in {py_iter}:"]
+                for c in other_children:
+                    lines.extend(emit_stmt(c, indent + 1))
+                for c in csg_children:
+                    ctx = EmitCtx(indent=pad + "    ")
+                    expr = _emit_csg(c, ctx)
+                    lines.extend(ctx.prelude)
+                    lines.append(f"{pad}    {step_name} = {expr}")
+                    lines.append(
+                        f"{pad}    {acc} = {step_name} if {acc} is None else {acc} + {step_name}"
+                    )
+                if indent == 0:
+                    top_level_accs.append(acc)
+                else:
+                    lines.append(f"{pad}# for-loop accumulator: {acc}")
+                return lines
+            inner: list[str] = []
             for c in body:
-                inner_lines.extend(emit_stmt(c, indent + 1))
-            return [
-                f"{pad}# TODO for ({var} = {it}) — review",
-                f"{pad}for {var} in {it}:",
-                *inner_lines,
-            ]
+                inner.extend(emit_stmt(c, indent + 1))
+            return [f"{pad}for {var} in {py_iter}:", *(inner or [f"{pad}    pass"])]
         return [f"{pad}# TODO unhandled stmt: {s!r}"]
 
-    last_csg_idx = -1
+    csg_var_names: list[str] = []
     for i, s in enumerate(stmts):
         if isinstance(s, CSGNode):
-            last_csg_idx = i
-
-    for i, s in enumerate(stmts):
-        if isinstance(s, CSGNode):
-            has_csg_actions = True
+            counter["n"] += 1
+            name = f"_csg_{counter['n']}"
             ctx = EmitCtx(indent="")
             expr = _emit_csg(s, ctx)
             out.extend(ctx.prelude)
-            if i == last_csg_idx:
-                out.append(f"result = {expr}")
-                result_assigned = True
-            else:
-                out.append(f"_csg_{i} = {expr}")
+            out.append(f"{name} = {expr}")
+            csg_var_names.append(name)
         else:
             out.extend(emit_stmt(s, 0))
-    if has_csg_actions and not result_assigned:
-        out.append("result = _csg_0  # TODO: pick the final CSG output")
-    elif not has_csg_actions:
-        out.append("# TODO: no top-level CSG action found — assign your part to `result`.")
+
+    # Final `result` is the union of every top-level CSG-producing statement
+    # (CSG action OR `for` loop with CSG body), mirroring OpenSCAD's behavior
+    # of rendering the implicit union of all top-level actions.
+    all_sources = csg_var_names + top_level_accs
+    if not all_sources:
+        out.append(
+            "# TODO: no top-level CSG action found — assign your part to `result`."
+        )
+    elif len(all_sources) == 1:
+        out.append(f"result = {all_sources[0]}")
+    else:
+        out.append("_top = [v for v in [" + ", ".join(all_sources) + "] if v is not None]")
+        out.append("result = _top[0]")
+        out.append("for _p in _top[1:]:")
+        out.append("    result = result + _p")
     return "\n".join(out) + "\n"
 
 
