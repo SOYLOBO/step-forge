@@ -7,6 +7,7 @@ const renderBtn = document.getElementById("renderBtn");
 const exportBtn = document.getElementById("exportBtn");
 const fileInput = document.getElementById("fileInput");
 const exampleBtn = document.getElementById("exampleBtn");
+const scadBtn = document.getElementById("scadBtn");
 const statusEl = document.getElementById("status");
 const fileChip = document.getElementById("filechip");
 const leftPane = document.getElementById("leftPane");
@@ -195,6 +196,43 @@ exampleBtn.addEventListener("click", () => {
   codeEl.value = EXAMPLE;
   fileChip.textContent = "example";
 });
+
+// ---- OpenSCAD -> build123d ----
+async function doTranslateScad() {
+  const src = codeEl.value;
+  if (!src.trim()) {
+    setStatus("Paste OpenSCAD into the editor first, then click OpenSCAD →.", "error");
+    return;
+  }
+  setStatus("Translating OpenSCAD → build123d...");
+  scadBtn.disabled = true;
+  try {
+    const res = await fetch("/api/translate-scad", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scad: src }),
+    });
+    if (!res.ok) {
+      let d;
+      try { d = (await res.json()).detail; } catch { d = await res.text(); }
+      throw new Error(d);
+    }
+    const { python } = await res.json();
+    codeEl.value = python;
+    fileChip.textContent = "translated from OpenSCAD";
+    const todoCount = (python.match(/# TODO/g) || []).length;
+    if (todoCount > 0) {
+      setStatus(`Translated. ${todoCount} TODO marker(s) — review them, then Render.`, todoCount > 5 ? "error" : "ok");
+    } else {
+      setStatus("Translated cleanly. Hit Render to see it.", "ok");
+    }
+  } catch (e) {
+    setStatus(`Translate failed: ${e.message}`, "error");
+  } finally {
+    scadBtn.disabled = false;
+  }
+}
+scadBtn.addEventListener("click", doTranslateScad);
 
 // ---- Trussify ----
 function trussParams() {

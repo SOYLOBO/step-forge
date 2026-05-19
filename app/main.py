@@ -14,6 +14,7 @@ import build123d as bd
 from build123d import export_step, export_stl, Shape
 
 from .truss import trussify, analyze as analyze_shape
+from . import scad_translate
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -150,6 +151,19 @@ def trussify_preview(payload: TrussifyIn) -> Response:
     headers["X-Savings-Pct"] = f"{savings_pct:.2f}"
     headers["Access-Control-Expose-Headers"] = ", ".join(headers.keys())
     return Response(content=data, media_type="model/stl", headers=headers)
+
+
+class TranslateIn(BaseModel):
+    scad: str
+
+
+@app.post("/api/translate-scad")
+def translate_scad(payload: TranslateIn) -> dict:
+    try:
+        py = scad_translate.translate(payload.scad)
+    except Exception:
+        raise HTTPException(status_code=400, detail=traceback.format_exc())
+    return {"python": py}
 
 
 @app.post("/api/upload-py")
